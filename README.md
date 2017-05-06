@@ -1,2 +1,2 @@
-# github.io
+# vladium
 tech talks and such
