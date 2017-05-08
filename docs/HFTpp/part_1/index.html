@@ -1,55 +1,429 @@
-<!DOCTYPE html>
-<html>
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+ "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <meta charset="utf-8">
-  <meta name="generator" content="pandoc">
-  <title></title>
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
-  <link rel="stylesheet" href="../../rvjs/css/reveal.css">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <meta name="generator" content="pandoc" />
+  <meta name="author" content="Vlad Roubtsov" />
+  <title>HFT++, part 1</title>
   <style type="text/css">code{white-space: pre;}</style>
-  <link rel="stylesheet" href="../../rvjs/css/theme/black.css" id="theme">
-  <!-- Printing and PDF exports -->
-  <script>
-    var link = document.createElement( 'link' );
-    link.rel = 'stylesheet';
-    link.type = 'text/css';
-    link.href = window.location.search.match( /print-pdf/gi ) ? '../../rvjs/css/print/pdf.css' : '../../rvjs/css/print/paper.css';
-    document.getElementsByTagName( 'head' )[0].appendChild( link );
-  </script>
-  <!--[if lt IE 9]>
-  <script src="../../rvjs/lib/js/html5shiv.js"></script>
-  <![endif]-->
+  <style type="text/css">
+div.sourceCode { overflow-x: auto; }
+table.sourceCode, tr.sourceCode, td.lineNumbers, td.sourceCode {
+  margin: 0; padding: 0; vertical-align: baseline; border: none; }
+table.sourceCode { width: 100%; line-height: 100%; }
+td.lineNumbers { text-align: right; padding-right: 4px; padding-left: 4px; color: #aaaaaa; border-right: 1px solid #aaaaaa; }
+td.sourceCode { padding-left: 5px; }
+code > span.kw { color: #007020; font-weight: bold; } /* Keyword */
+code > span.dt { color: #902000; } /* DataType */
+code > span.dv { color: #40a070; } /* DecVal */
+code > span.bn { color: #40a070; } /* BaseN */
+code > span.fl { color: #40a070; } /* Float */
+code > span.ch { color: #4070a0; } /* Char */
+code > span.st { color: #4070a0; } /* String */
+code > span.co { color: #60a0b0; font-style: italic; } /* Comment */
+code > span.ot { color: #007020; } /* Other */
+code > span.al { color: #ff0000; font-weight: bold; } /* Alert */
+code > span.fu { color: #06287e; } /* Function */
+code > span.er { color: #ff0000; font-weight: bold; } /* Error */
+code > span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+code > span.cn { color: #880000; } /* Constant */
+code > span.sc { color: #4070a0; } /* SpecialChar */
+code > span.vs { color: #4070a0; } /* VerbatimString */
+code > span.ss { color: #bb6688; } /* SpecialString */
+code > span.im { } /* Import */
+code > span.va { color: #19177c; } /* Variable */
+code > span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+code > span.op { color: #666666; } /* Operator */
+code > span.bu { } /* BuiltIn */
+code > span.ex { } /* Extension */
+code > span.pp { color: #bc7a00; } /* Preprocessor */
+code > span.at { color: #7d9029; } /* Attribute */
+code > span.do { color: #ba2121; font-style: italic; } /* Documentation */
+code > span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+code > span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+  </style>
+  <link rel="stylesheet" type="text/css" media="screen, projection, print"
+    href="../../slidy/styles/slidy.css" />
+  <link rel="stylesheet" type="text/css" media="screen, projection, print"
+   href="../../css/buttondown.css" />
+  <script src="../../slidy/scripts/slidy.js"
+    charset="utf-8" type="text/javascript"></script>
 </head>
 <body>
-  <div class="reveal">
-    <div class="slides">
+<div class="slide titlepage">
+  <h1 class="title">HFT++, part 1</h1>
+  <p class="author">
+Vlad Roubtsov
+  </p>
+  <p class="date">May 8, 2017</p>
+</div>
+<div class="slide section level1">
 
+<p>There are many cool techniques in high performance C++ and we will see some of them today (and more later, maybe), but right now my goal is to convince you to</p>
+<ul class="incremental">
+<li><strong>measure</strong>: <em>establish a baseline</em> before attempting to speed up everything in sight</li>
+<li><strong>understand</strong>: once you have a usable &quot;CPU+compiler model&quot; in your head, techniques become <em>common sense</em></li>
+</ul>
+</div>
+<div id="we-start-where-many-people-finish-profiling" class="slide section level1">
+<h1>we start where many people finish: profiling</h1>
+<p>Today I will talk not so much about data structures or algorithms (market data books and such) but rather suggest a different kind of intuition for low latency work.</p>
+<p>This intuition comes from two sources:</p>
+<ol style="list-style-type: decimal">
+<li>understanding some things about CPUs</li>
+<li>understanding some things about compilers</li>
+</ol>
+<p>The textbook approach of thinking in terms of asymptotic O(...)-performance scaling is often incorrect for HFT. I hope to convince you that starting in the opposite direction is actually more appropriate when designing for low latency.</p>
+</div>
+<div id="a-modern-cpu" class="slide section level1">
+<h1>a modern CPU</h1>
+<ul>
+<li><strong>pipelined</strong>: an interpreter of a <em>high-level language</em> called &quot;x86 assembly&quot;
+<ul>
+<li><span class="math inline"><em>μ</em></span>Ops, a &quot;dispatcher&quot;, multiple redundant execution units</li>
+</ul></li>
+<li><strong>super-scalar</strong>: can issue and potentially complete <em>more than one instruction per cycle</em> (IPC)
+<ul>
+<li>e.g. Nehalem could do up to 4 (max IPC = 4)</li>
+</ul></li>
+</ul>
+<p>CPU is a like a tiny &quot;cluster&quot; with a &quot;job scheduler&quot; that tries to execute everything that can be executed -- as long as it appears &quot;serial&quot; to us.</p>
+<div class="incremental">
+<p>There's more:</p>
+<ul>
+<li><strong>speculative execution</strong>: CPU will look ahead for more work to do and try to predict branch outcomes, first <em>statically</em> and then <em>dynamically</em> on repeat visits</li>
+<li><strong>branch predication</strong>: some CPUs (Itanium) can execute <em>both</em> branch outcomes and &quot;merge&quot; the results</li>
+</ul>
+</div>
+</div>
+<div id="one-takeaway-already" class="slide section level1">
+<h1>one takeaway already</h1>
+<ul>
+<li>at any given moment, the CPU is not executing any one particular <em>single</em> line of code. Not even a single x86 assembly instruction.</li>
+<li>in a tight loop, it is normal for the CPU to be prefetching, decoding, and speculatively executing several next iterations</li>
+<li>so, if you insert a <code>rdtsc</code> somewhere -- <a href="https://youtu.be/yB-JzPBJalA">what exactly do you think are you capturing?</a></li>
+</ul>
+</div>
+<div id="things-that-are-costly-for-a-modern-cpu" class="slide section level1">
+<h1>things that are costly for a modern CPU</h1>
+<p>CPUs can no longer increase clock frequency, they rely on deeper pipelines to increase FLOPs.</p>
+<ol style="list-style-type: decimal">
+<li>anything that prevents the pipeline from being constantly full of things to do
+<ul>
+<li><strong>data hazards</strong>: an instruction needs to wait for the result of another instruction</li>
+<li><strong>control hazards</strong>: <code>if-then-else</code> branches, function calls with dynamically calculated targets</li>
+</ul></li>
+<li>anything that is costly algorithmically (<code>idiv</code>)</li>
+<li>anything that is mechanically costly (memory access)</li>
+</ol>
+<blockquote>
+<p><strong>note:</strong> data hazards are less costly than control hazards (CPU can use <code>store-and-forward</code> techniques to make instruction results available internally sooner)</p>
+</blockquote>
+<blockquote>
+<p><strong>note:</strong> static jumps are <em>not</em> expensive (easily prefetched) -- at least for the CPU</p>
+</blockquote>
+<blockquote>
+<p><strong>note:</strong> very predictable dynamic jumps are <em>not</em> expensive either (dedicated hardware), but they do consume finite hardware resources (BTB slots)</p>
+</blockquote>
+</div>
+<div id="a-rough-hierarchy-of-cpu-costly-things" class="slide section level1">
+<h1>a rough hierarchy of CPU-costly things</h1>
+<p>In approximate order of increasing costs:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">operation</th>
+<th align="right">cost (cycles)</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">L1 miss</td>
+<td align="right">~10</td>
+</tr>
+<tr class="even">
+<td align="right">branch misprediction</td>
+<td align="right">~20</td>
+</tr>
+<tr class="odd">
+<td align="right">L2 miss</td>
+<td align="right">~40</td>
+</tr>
+<tr class="even">
+<td align="right">signed int division (<code>idiv</code>)</td>
+<td align="right">~100</td>
+</tr>
+<tr class="odd">
+<td align="right">L3 miss</td>
+<td align="right">~200</td>
+</tr>
+</tbody>
+</table>
+<p>Over the last few years the state of the art in data structure/algorithm design has evolved to reflect these relative cost magnitudes. A few loose divisions here and there and we start talking a whole microsecond.</p>
+<blockquote>
+<p><strong>A quick example</strong>: making bucket arrays in hashtables to be prime-sized is nice in theory, but not so great in practice if it implies an <code>idiv</code> that the C++ <code>%</code> operator compiles to. By comparison, power-of-2 sizing starts with a massive latency edge (a fast <code>and</code>).</p>
+</blockquote>
+</div>
+<div id="lets-talk-about-c-plus-plus" class="slide section level1">
+<h1>let's talk about C (plus plus)</h1>
+<p>C++: an ancient language kept alive by issuing hundreds of pages of new standardese every ~3 years.</p>
+<p>It is useless for almost everything that's making Big Money today: www, mobile. So why do we use it?</p>
+<div class="incremental">
+<ul>
+<li>pretty much the only viable option for programming in the <em>&quot;I understand what the assembly for this might look like&quot;</em> mode</li>
+<li>there is hope: each new standard makes C++ more &quot;modern&quot; by stealing ideas from Java (mostly), Python, etc.</li>
+</ul>
+<p>Ultimately, we want to remain &quot;close enough&quot; to hardware and that pipelined/super-scalar model of it we've built in our heads.</p>
+<!---
+in all fairness, new C++ features are driven by actual needs of practitioners and some of them allow
+performance not possible in either C or C++03, so it pays to keep up with developments (CppCon talks)
+-->
+</div>
+</div>
+<div id="things-that-are-costly-for-a-c-compiler" class="slide section level1">
+<h1>things that are costly for a C++ compiler</h1>
+<ul>
+<li>optimizing across a function call boundary</li>
+<li>reordering your class fields for better memory locality
+<ul>
+<li>language forbids this within the same access group (in practice everywhere)</li>
+</ul></li>
+<li>predicting your dynamic jump targets
+<ul>
+<li>including devirtualizing your virt fn calls (in most cases)</li>
+</ul></li>
+<li>being more like Fortran where <em>nothing is ever aliased</em></li>
+<li>optimizing based on runtime data info (a la JVM)</li>
+</ul>
+<!---
+    - aside: the deal with "strict aliasing" TODO link
+    - DO NOT: turn off strict aliasing mode or suppress any resultant warnings instead of fixing them properly
+-->
+</div>
+<div id="pause-for-thought" class="slide section level1">
+<h1>pause for thought</h1>
+<p>Now we know what kind of things to be concerned about.</p>
+<div class="incremental">
+<p>What we need are some ways of detecting them.</p>
+<blockquote>
+<p>Soon after we'll want to be able to peek under the hood.</p>
+</blockquote>
+</div>
+</div>
+<div id="a-timeless-technique-peeking-at-the-assembly" class="slide section level1">
+<h1>a timeless technique: peeking at the assembly</h1>
+<ul>
+<li>often recommended but somewhat unwieldy: letting gcc stop at the assembly stage</li>
+</ul>
+<pre><code>  &gt;g++ -std=c++11 -O3 -S -o main.asm main.cpp</code></pre>
+<p>or interlace with source code (if you're very enthusiastic)</p>
+<pre><code>  &gt;g++ -std=c++11 -O3 -g -Wa,-aslh main.cpp &gt; main.asm  </code></pre>
+<ul>
+<li>quicker ways:</li>
+</ul>
+<pre><code>  &gt;objdump -d main
+  &gt;objdump -d main.o
+  &gt;objdump -d mylib.so</code></pre>
+<ul>
+<li>some of these options will require grepping output or will obfuscate logic due to incomplete relocations, so I like this neat trick for examining a single function:</li>
+</ul>
+<pre><code>  &gt;gdb -batch -ex &#39;file ./main&#39; -ex &#39;disassemble my_fun&#39;  </code></pre>
+<ul>
+<li>also: gdb, disassembly view in Eclipse debugger</li>
+</ul>
+<!---
+- adding your own asm markers
+-->
+</div>
+<div id="when-in-doubt-ask-god" class="slide section level1">
+<h1>when in doubt, ask God</h1>
+<p><a href="https://godbolt.org">godbolt</a> is indispensable for examining what-if scenarios for short-ish code snippets in different compilers and with different compiler options</p>
+<div class="figure">
+<img src="images/godbolt.3.png" title="gcc 4.8.3 with -O3" alt="gcc 4.8.3 with -O3" style="width:75.0%" />
+<p class="caption">gcc 4.8.3 with -O3</p>
+</div>
+</div>
+<div id="case-study-what-do-likely-and-unlikely-actually-accomplish" class="slide section level1">
+<h1>case study: what do <code>LIKELY()</code> and <code>UNLIKELY()</code> actually accomplish?</h1>
+<p>my version is typical:</p>
+<div class="sourceCode"><pre class="sourceCode cpp"><code class="sourceCode cpp">  <span class="pp">#define VR_LIKELY(condition)        __builtin_expect(static_cast&lt;bool&gt; (condition), 1)</span>
+  <span class="pp">#define VR_UNLIKELY(condition)      __builtin_expect(static_cast&lt;bool&gt; (condition), 0)</span></code></pre></div>
+<div class="figure">
+<img src="images/godbolt.4.png" title="branch hinting with LIKELY()/UNLIKELY()" alt="branch hinting with LIKELY()/UNLIKELY()" style="width:70.0%" />
+<p class="caption">branch hinting with LIKELY()/UNLIKELY()</p>
+</div>
+</div>
+<div id="case-study-the-curious-case-of-a-callback-with-too-many-arguments" class="slide section level1">
+<h1>case study: the curious case of a callback with too many arguments</h1>
+<p>see the effects of the x86-64 (&quot;itanium&quot;) ABI</p>
+<div class="figure">
+<img src="images/godbolt.abi.png" title="parameter spills into memory" alt="parameter spills into memory" style="width:70.0%" />
+<p class="caption">parameter spills into memory</p>
+</div>
+</div>
+<div id="case-study-the-curious-case-of-a-callback-with-too-many-arguments-contd" class="slide section level1">
+<h1>case study: the curious case of a callback with too many arguments, cont'd</h1>
+<table>
+<thead>
+<tr class="header">
+<th></th>
+<th align="left">parameters in registers</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td></td>
+<td align="left">RDI, RSI, RDX, RCX, R8, R9, XMM0–7</td>
+</tr>
+</tbody>
+</table>
+<p>The magic number to remember for int arguments is <em>6</em>.</p>
+<p>Note that small PODs with int fields <em>can</em> be passed via registers:</p>
+<div class="figure">
+<img src="images/godbolt.abi.struct.png" title="&#39;s&#39; is passed via registers" alt="&#39;s&#39; is passed via registers" style="width:70.0%" />
+<p class="caption">'s' is passed via registers</p>
+</div>
+<!---
 
-<section id="hft-part-1" class="slide level1">
-<h1>HFT++ (part 1/?)</h1>
-<p>test</p>
-</section>
-    </div>
-  </div>
+# case study: avoiding branches in if-statements (&)
 
-  <script src="../../rvjs/lib/js/head.min.js"></script>
-  <script src="../../rvjs/js/reveal.js"></script>
+- short-circuiting has a dark side
 
-  <script>
+# case study: single-branch versions of double checks; branchless if-then-else; cmov
 
-      // Full list of configuration options available at:
-      // https://github.com/hakimel/reveal.js#configuration
-      Reveal.initialize({
+- gcc is smarter than you think; it can even shift bits around to stuff more int values into arg registers
+- cmov vs a single predictable branch (TODO link to discussion)
 
-        // Optional reveal.js plugins
-        dependencies: [
-          { src: '../../rvjs/lib/js/classList.js', condition: function() { return !document.body.classList; } },
-          { src: '../../rvjs/plugin/zoom-js/zoom.js', async: true },
-              { src: '../../rvjs/plugin/notes/notes.js', async: true }
-        ]
-      });
-    </script>
-    </body>
+# case study: `volatile` considered harmful (and it doesn't do what you think it does)
+
+- Linux's (or Linus') `ACCESS_ONCE()`
+
+# another timeless technique: `strace` and `ltrace`
+
+# case study: how expensive is a syscall?
+
+- are there any syscalls that aren't expensive?
+
+-->
+</div>
+<div id="tools-and-techniques-for-profiling" class="slide section level1">
+<h1>tools and techniques for profiling</h1>
+<ul>
+<li>(really) old school: compiler instrumentation
+<ul>
+<li>compiler provides hooks, you need to figure out how to measure and log timing data yourself</li>
+<li>it's a challenge to do so non-intrusively (at HFT scales)</li>
+</ul></li>
+<li>old school: gperftools
+<ul>
+<li>only CPU time (superceded by more modern tools) and memory</li>
+<li>not bad, considering the libs can always be linked in and will lie &quot;dormant&quot; unless enabled via env variables
+<ul>
+<li>tcmalloc will warn about &quot;large memory allocations&quot; (usually your bug, e.g. in data unmarshalling code)</li>
+<li>tcmalloc will warn about duplicate delete's (mixing static and dynamic linking, etc)</li>
+</ul></li>
+</ul></li>
+</ul>
+</div>
+<div id="old-ish-school-reading-tsc" class="slide section level1">
+<h1>old-ish school: reading TSC</h1>
+<p>Seems easy to use and on modern CPUs no issues with &quot;unstable TSC frequency&quot;, but lots of details involved in making this technique provide reliable data:</p>
+<ul>
+<li>disable hyperthreading (what are HTs, really?)</li>
+<li>run on real hardware representative of production runtime, not virtualized</li>
+<li>disable CPU governors/prevent power state changes</li>
+<li>pin threads to different <strong>cores</strong> (not hyperthreads) similar to production deployment</li>
+<li>cross-socket memory traffic is more expensive, but measure whatever production setup is</li>
+<li>quiescent machine; avoid interference from other apps (avoid core #0, etc)</li>
+<li>important: get memory/instruction caches into &quot;known&quot;/reproducible state before starting to measure
+<ul>
+<li>easiest is just to force the CPU to read through dummy mem data of known size</li>
+<li>choice of L1, L2, L3, etc depends on the expected production use case (easier said than done)</li>
+</ul></li>
+<li><strong>important:</strong> decide how much fencing to do; accuracy vs overhead; Shrodinger TSC values
+<ul>
+<li>to loop or not to loop: single instruction latency != pipelined instruction latency</li>
+</ul></li>
+<li><strong>important:</strong> use stable stats metrics (can't avoid interference from interrupts, etc)</li>
+<li><strong>important:</strong> subtract the overhead of measurement itself (different ways of doing that)</li>
+</ul>
+<p>A fine technique if you just want cycle timings <strong>and</strong> you have the necessary framwork for reproducible results, but a lot of people get lazy here.</p>
+<!---
+
+# case study: faster than fast int divide
+
+note: compiler will not emit an `idiv` unless it absolutely has to; `x / <compile-time const>` will
+be transformed into an equivalent operation that uses shifts, muls, adds, etc
+
+-->
+</div>
+<div id="oprofile-getting-easier-and-more-interesting-at-the-same-time" class="slide section level1">
+<h1>oprofile: getting easier and more interesting at the same time</h1>
+<p>Not your father's profiler any more, but not spending much time here today because the perf suite (next) seems strictly better since it enjoys full kernel support</p>
+<div class="figure">
+<img src="images/oprofile.png" title="oprofile works with perf registers" alt="oprofile works with perf registers" style="width:80.0%" />
+<p class="caption">oprofile works with perf registers</p>
+</div>
+</div>
+<div id="perf-modern-linux-profiling-with-hardware-counters" class="slide section level1">
+<h1>perf: modern Linux profiling with hardware counters</h1>
+<p>dedicated hardware almost always preferred to source code instrumentation; except for overhead of storing data samples, no performance impact; additionally, <code>perf</code> tooling is directly supported by the kernel (which makes it thread- and process-context switching-aware)</p>
+<p>familiarity with CPU-specific registers is useful: certain events can be programmed to collect data not available any other way, e.g. cross-socket traffic (Uncore)</p>
+<p>hardware can be programmed to record the exact location (IP) of an &quot;event&quot;, which can be mapped to the source code later</p>
+<p>number of perf registers is limited; for accurate accounting, use a small set of events to avoid approximation noise due to &quot;multiplexing&quot;</p>
+<p>possibly the single most important aggregate metric: IPC; know what the theoretical peak hardware value is</p>
+<p>perf cli: - <code>perf record</code>, <code>perf report</code> - by default, perf API can't break counts down by threads of a process, so use <code>-a -C ...</code> options</p>
+</div>
+<div id="case-study-flogging-the-dead-virt-function-horse" class="slide section level1">
+<h1>case study: flogging the dead virt function horse</h1>
+<div class="incremental">
+<ul>
+<li>(very) poor man's &quot;devirtualization&quot;</li>
+</ul>
+<!---
+
+# case study: false (or not) sharing
+   
+# case study: cache capacity (?) misses
+
+- sometimes aligning *everything* on power-of-2 addresses is not ideal
+
+-->
+</div>
+</div>
+<div id="suggestions-for-practice" class="slide section level1">
+<h1>suggestions for practice</h1>
+<ul>
+<li>use dedicated &quot;perf test cases&quot; to isolate and profile select areas and data structures</li>
+</ul>
+</div>
+<div id="c-ide-support-for-profiling-has-really-improved-in-recent-years" class="slide section level1">
+<h1>C++ IDE support for profiling has really improved in recent years</h1>
+<ul>
+<li>and by &quot;a helpful C++ IDE&quot; I mean Eclipse: see <a href="https://eclipse.org/linuxtools/">Linux Tools</a>
+<ul>
+<li>my usual impression of an Emacs or vim C++ coder: furious typing for 1 min just to open a file</li>
+</ul></li>
+<li>see <a href="http://wiki.eclipse.org/Linux_Tools_Project/PERF/User_Guide">Eclipse PERF User Guide</a>
+<ul>
+<li>no more being a slave to Intel compiler and VTune</li>
+</ul></li>
+<li>perf profiling, <code>Perf Profile View</code>
+<ul>
+<li>comparing <a href="http://www.eclipse.org/linuxtools/projectPages/perf/">perf profiles</a></li>
+<li>source disassembly view, stat view</li>
+</ul></li>
+<li><code>Perf Events</code> configuration tab: select events</li>
+</ul>
+<!---
+
+(don't forget to enable c++11 dialect)
+
+-->
+</div>
+</body>
 </html>
